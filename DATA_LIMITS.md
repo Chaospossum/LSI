@@ -38,6 +38,63 @@ This is a **landing-site screening tool**, not a survey-grade site certificate. 
 - Leaflet **Web Mercator cannot show 90°S** (clips near 85°). The app map uses Leaflet **Simple CRS** with **south polar stereographic metres**. Click coordinates are (x, y) metres, converted to lon/lat only for the inspect panel and what-if lander.
 - This is still not a lunar web-tile globe. Report figures (`figures/*.png`) are the undistorted raster view.
 
+## Statistical validity — what the numbers support, and what they do not
+
+The suitability score is a **multi-criteria preference index**. It is not a probability
+of mission success, not a certification, and it is not calibrated against any landing
+outcome, because no such training set exists at 5 m for this site. Treating it as a
+success probability would be the single most expensive mistake a reader of this tool
+could make.
+
+What *is* defensible is a statement about **ranking stability**: given the published
+error of the inputs and a stated uncertainty on the weights, how likely is a candidate
+to be in the top 5? `python -m src.uncertainty` answers that and prints every
+assumption behind it.
+
+### Three problems with a pixel score, and what the tool does about them
+
+- **A lander needs a pad, not a pixel.** A single 5 m pixel is the noisiest possible
+  estimator. Candidates are scored over a square pad (default 105 m across) and the
+  hard constraint becomes *what fraction of the pad exceeds the slope limit* (default
+  tolerance 5%), which is what a flight-safety reviewer actually asks.
+- **Winner's curse.** Selecting the maximum over ~10⁷ pixels selects for favourable
+  noise as well as favourable terrain, so the winning pixel's score is biased high.
+  Footprint averaging shrinks the noise and the reported figure is the Monte-Carlo
+  **mean**, not the value that won the search.
+- **One-at-a-time weight sensitivity is not sensitivity analysis.** The ±20% OAT table
+  explores a measure-zero slice of the weight simplex. Weights are also drawn jointly
+  from a **Dirichlet** centred on the nominal values.
+
+### The error model is an assumption, and it is printed
+
+| Term | Value | Source |
+|---|---|---|
+| Slope RMS, measured pixels | 1.5° | Barker et al. 2021 — **verify the table before quoting** |
+| Slope RMS, interpolated pixels | 2.5° | Barker et al. 2021 — **verify** |
+| Systematic slope bias | σ = 0.5° | **assumed** — does not average away over a pad |
+| Slope error correlation length | 50 m | **assumed** — sets how much averaging buys |
+| Correlated share of slope variance | 0.7 | **assumed** |
+| Illumination / Earth-visibility scale | 5% relative | **assumed** |
+| 60 m → 5 m representativeness | 0.5 × local range | **assumed** |
+| Distance-to-PSR | σ = 60 m | LPSR product resolution |
+| Weight spread | 20% relative (Dirichlet) | matched to the OAT report |
+
+Errors are treated as Gaussian and only partly independent. Real DEM error is neither.
+If the σ above are wrong, every interval this tool prints is wrong with them.
+
+### Criterion independence
+
+`spearman_matrix` reports the rank correlation between the four criteria. Two criteria
+that correlate strongly are **the same terrain fact counted twice**, which inflates the
+winner's apparent margin. Read that matrix before defending the weights.
+
+### Conflicts
+
+`conflict_probability` replaces the binary overlap flag with P(overlap) under coordinate
+uncertainty (assumed: published σ = 150 m, approximate σ = 5 km). Placeholder geometry
+returns **NaN**, never a number: inventing an uncertainty for a made-up point would
+launder it into a result.
+
 ## What this tool is for
 
 Regional comparison of slope, illumination, PSR proximity, Earth visibility, and operation buffers — with explicit metadata and a confidence penalty from the LOLA count map.

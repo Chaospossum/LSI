@@ -229,3 +229,77 @@ def figure_conflict(bundle, scored, registry_polar, conflicts_df, dest: Path) ->
     fig.tight_layout()
     fig.savefig(dest, dpi=150)
     plt.close(fig)
+
+
+# One hue for one series, muted ink for text, recessive grid. No rainbow, no legend
+# for a single series — the title names it.
+_INK = "#1f2328"
+_INK_MUTED = "#6b7280"
+_HUE = "#2f6fb5"
+_GRID = "#d8dce1"
+
+
+def figure_ranking_intervals(mc: dict, dest: Path, top_n: int = 10) -> None:
+    """Candidate ranking as an interval plot — the honest form for this data.
+
+    A bar chart of the index would imply the differences are real. They mostly are not:
+    what the Monte Carlo produces is an interval per site, so the chart draws the
+    interval and lets the overlap speak. Sites statistically tied with rank 1 are
+    banded and labelled in text, never by colour alone.
+    """
+    from src.uncertainty import pairwise_dominance, summary_table
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    table = summary_table(mc).head(top_n)
+    if table.empty:
+        return
+
+    s = mc["samples"]
+    order = np.argsort(-s.mean(axis=1))[:top_n]
+    best = int(order[0])
+    tied = [k for k, i in enumerate(order) if pairwise_dominance(mc, best, int(i)) < 0.95]
+
+    y = np.arange(len(table))[::-1]
+    fig, ax = plt.subplots(figsize=(8.6, 0.46 * len(table) + 2.4))
+
+    if tied:
+        hi = max(table["ci95"].iloc[k] for k in tied)
+        ax.axhspan(y[max(tied)] - 0.5, y[min(tied)] + 0.5, color=_GRID, alpha=0.35, lw=0)
+        ax.text(
+            hi, y[min(tied)] + 0.62,
+            f"not separable from rank 1 at 95% ({len(tied)} sites)",
+            fontsize=8, color=_INK_MUTED, ha="right", va="bottom",
+        )
+
+    for k, yy in enumerate(y):
+        row = table.iloc[k]
+        ax.plot([row["ci05"], row["ci95"]], [yy, yy], color=_HUE, lw=2, solid_capstyle="round", alpha=0.75)
+        ax.plot([row["index_mean"]], [yy], "o", color=_HUE, markersize=8, zorder=3)
+        ax.text(
+            row["ci95"] + 0.004, yy, f"P(top 5) = {row['P_top5']:.2f}",
+            fontsize=8, color=_INK_MUTED, va="center",
+        )
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(
+        [f"#{int(r['rank'])}  {r['lat']:.3f}°, {r['lon']:.3f}°" for _, r in table.iterrows()],
+        fontsize=8, color=_INK,
+    )
+    ax.set_xlabel("suitability index (footprint mean) — 90% credible interval", fontsize=9, color=_INK)
+    ax.set_title(
+        "Site04 candidate ranking under input and weight uncertainty\n"
+        f"{mc['n_draws']} Monte-Carlo draws · {mc['pad_m']:.0f} m pad · "
+        "preference index, not a probability of mission success",
+        fontsize=10, color=_INK, loc="left",
+    )
+    ax.grid(axis="x", color=_GRID, lw=0.6)
+    ax.set_axisbelow(True)
+    for side in ("top", "right", "left"):
+        ax.spines[side].set_visible(False)
+    ax.spines["bottom"].set_color(_GRID)
+    ax.tick_params(axis="x", colors=_INK_MUTED, labelsize=8)
+    ax.tick_params(axis="y", length=0)
+    ax.margins(x=0.12)
+    fig.tight_layout()
+    fig.savefig(dest, dpi=150)
+    plt.close(fig)

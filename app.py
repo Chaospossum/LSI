@@ -14,12 +14,28 @@ from shapely.geometry import Point
 from streamlit_folium import st_folium
 
 from src import paths
-from src.conflict import find_conflicts
+from src.conflict import conflict_probability, find_conflicts
 from src.crs import to_lonlat
 from src.ingest import load_site, raster_center_lonlat
 from src.registry import append_whatif, buffer_features, load_registry, seed_whatif
 from src.score import DEFAULT_WEIGHTS, describe_pixel, score, sensitivity, top_sites
-from src.viz import figure_conflict, figure_score_map, make_folium_map, pixel_from_leaflet, score_rgba
+from src.uncertainty import (
+    assumptions_table,
+    candidate_sites,
+    footprint_maps,
+    monte_carlo,
+    separation_verdict,
+    spearman_matrix,
+    summary_table,
+)
+from src.viz import (
+    figure_conflict,
+    figure_ranking_intervals,
+    figure_score_map,
+    make_folium_map,
+    pixel_from_leaflet,
+    score_rgba,
+)
 
 st.set_page_config(page_title="LUNAR SITE INTELLIGENCE", layout="wide")
 
@@ -57,7 +73,7 @@ def main():
         st.error(str(e))
         st.stop()
 
-    tab_map, tab_limits = st.tabs(["Map", "Data & limits"])
+    tab_map, tab_stats, tab_limits = st.tabs(["Map", "Ranking statistics", "Data & limits"])
 
     with st.sidebar:
         st.header("Weights (renormalised to 1)")
@@ -147,6 +163,10 @@ def main():
 
         with right:
             st.subheader("Top 5 sites")
+            st.caption(
+                "Single-pixel ranking. Before quoting any of these, read the Ranking "
+                "statistics tab — the top candidates are usually not separable."
+            )
             if sites:
                 st.dataframe(
                     pd.DataFrame(
@@ -186,6 +206,57 @@ def main():
                     sens = sensitivity(bundle, scored["weights"])
                     st.dataframe(pd.DataFrame(sens["rows"]), hide_index=True)
                     st.write("All perturbations keep the same top-5:", "yes" if sens["all_stable"] else "no")
+
+    with tab_stats:
+        st.subheader("Is the ranking real, or is it noise?")
+        st.markdown(
+            "A single 5 m pixel is the noisiest possible estimator, and taking the maximum "
+            "over millions of them selects for favourable error. These numbers score a **pad**, "
+            "propagate the published input error and the uncertainty on the weights, and report "
+            "what survives. The index is a preference score — **not** a probability of mission success."
+        )
+        c1, c2, c3 = st.columns(3)
+        radius_m = c1.slider("pad radius (m)", 10, 200, 50, 5)
+        n_draws = c2.select_slider("Monte-Carlo draws", [200, 500, 1000, 2000, 5000], value=1000)
+        n_cand = c3.slider("candidate pool", 5, 50, 25, 5)
+        if st.button("Run ranking statistics", type="primary"):
+            with st.spinner("Propagating input and weight uncertainty…"):
+                fp = footprint_maps(bundle, weights, radius_m=radius_m, slope_max=slope_max)
+                cand = candidate_sites(fp, bundle, n=n_cand)
+                mc = monte_carlo(bundle, fp, cand, n_draws=int(n_draws))
+            if not cand:
+                st.warning("No pad of this size passes the slope budget. Widen the slope limit or shrink the pad.")
+            else:
+                st.success(separation_verdict(mc))
+                st.dataframe(summary_table(mc), hide_index=True, use_container_width=True)
+                st.caption(
+                    f"Pad {mc['pad_m']:.0f} m across · {mc['n_draws']} draws · effective independent "
+                    f"samples per pad ≈ {mc['n_eff']:.0f} (spatially correlated error does not average away)."
+                )
+                st.markdown("**Criterion rank correlation** — high |ρ| means two criteria are the same evidence twice.")
+                st.dataframe(spearman_matrix(bundle, fp), use_container_width=True)
+                st.markdown("**Error model** — every interval above depends on these. Assumed values are labelled.")
+                st.dataframe(assumptions_table(mc["model"]), hide_index=True, use_container_width=True)
+                if st.button("Export ranking_intervals.png"):
+                    figure_ranking_intervals(mc, paths.FIGURES / "ranking_intervals.png")
+                    st.success(str(paths.FIGURES / "ranking_intervals.png"))
+
+        st.divider()
+        st.subheader("Conflicts, with coordinate uncertainty")
+        st.markdown(
+            "A binary conflict flag computed from coordinates uncertain by kilometres is a "
+            "statement about the GeoJSON, not about the Moon."
+        )
+        cp = conflict_probability(gdf, user_buffers=user_buf)
+        if cp.empty:
+            st.info("No time-overlapping pairs to assess.")
+        else:
+            st.dataframe(cp, hide_index=True, use_container_width=True)
+            st.caption(
+                "P_conflict is NaN for placeholder geometry on purpose: inventing an uncertainty "
+                "for a made-up point would launder it into a result. Position σ by provenance is an "
+                "assumption — see src/conflict.py."
+            )
 
     with tab_limits:
         limits = ROOT / "DATA_LIMITS.md"
