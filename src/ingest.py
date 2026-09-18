@@ -23,6 +23,12 @@ from src import paths
 from src.crs import LUNAR_SP_STEREO, stereo_from_raster, to_lonlat
 
 
+# PDS AVGVISIB products store illumination/Earth-visibility as int16 DN with a
+# documented scaling factor. Some copies carry it as a GeoTIFF tag, some only in the
+# PDS label — so apply it explicitly when the file does not, and say so in metadata.
+PDS_VISIB_SCALE = 4.0e-5
+
+
 @dataclass
 class LayerMeta:
     name: str
@@ -60,13 +66,23 @@ def _open_array(path: Path):
     return src, data
 
 
-def _reproject_to(src_path: Path, dst_profile, resampling=Resampling.bilinear) -> np.ndarray:
+def _reproject_to(
+    src_path: Path, dst_profile, resampling=Resampling.bilinear, fallback_scale: float | None = None
+) -> tuple[np.ndarray, bool]:
+    """Reproject onto the 5 m grid. Returns (array, fallback_scale_applied)."""
+    used_fallback = False
     with rasterio.open(src_path) as src:
         arr = src.read(1).astype(np.float32)
         nd = src.nodata
         if nd is not None and np.isfinite(nd):
             arr = np.where(arr == nd, np.nan, arr)
+        tagged = bool(src.scales) and float(src.scales[0] or 1.0) != 1.0
         arr = _apply_scale(src, arr)
+        if fallback_scale and not tagged:
+            mx = np.nanmax(arr)
+            if np.isfinite(mx) and mx > 1.5:
+                arr = arr * float(fallback_scale)
+                used_fallback = True
         out = np.full((dst_profile["height"], dst_profile["width"]), np.nan, dtype=np.float32)
         reproject(
             source=arr,
@@ -79,7 +95,7 @@ def _reproject_to(src_path: Path, dst_profile, resampling=Resampling.bilinear) -
             src_nodata=np.nan,
             dst_nodata=np.nan,
         )
-    return out
+    return out, used_fallback
 
 
 def hillshade(z: np.ndarray, pixel_m: float, azimuth=315.0, altitude=45.0) -> np.ndarray:
@@ -173,8 +189,11 @@ def load_site(cap_psr_m: float = 2000.0) -> dict:
 
     illum = earth = psr = None
     if paths.ILLUM.exists():
-        illum = _reproject_to(paths.ILLUM, {**profile, "height": dem.shape[0], "width": dem.shape[1], "crs": dem_src.crs, "transform": dem_src.transform})
-        # PDS maps are typically 0–1 fraction or 0–100. Normalise later in score.py.
+        illum, illum_fallback = _reproject_to(
+            paths.ILLUM,
+            {**profile, "height": dem.shape[0], "width": dem.shape[1], "crs": dem_src.crs, "transform": dem_src.transform},
+            fallback_scale=PDS_VISIB_SCALE,
+        )
         layers.append(
             LayerMeta(
                 name="illumination",
@@ -184,11 +203,19 @@ def load_site(cap_psr_m: float = 2000.0) -> dict:
                 projection=proj_txt,
                 kind="interpolated",
                 units="fraction (resampled)",
-                notes="Mazarico/PDS AVGVISIB 85S 60 m (DN×4e-5 = 0–1 fraction), bilinear onto 5 m. Not a 5 m measurement.",
+                notes=(
+                    "Mazarico/PDS AVGVISIB 85S 60 m (DN×4e-5 = 0–1 fraction), bilinear onto 5 m. "
+                    "Not a 5 m measurement. Scale source: "
+                    + ("documented PDS factor applied here (no GeoTIFF scale tag)." if illum_fallback else "GeoTIFF scale tag.")
+                ),
             )
         )
     if paths.EARTH_VIS.exists():
-        earth = _reproject_to(paths.EARTH_VIS, {**profile, "height": dem.shape[0], "width": dem.shape[1], "crs": dem_src.crs, "transform": dem_src.transform})
+        earth, earth_fallback = _reproject_to(
+            paths.EARTH_VIS,
+            {**profile, "height": dem.shape[0], "width": dem.shape[1], "crs": dem_src.crs, "transform": dem_src.transform},
+            fallback_scale=PDS_VISIB_SCALE,
+        )
         layers.append(
             LayerMeta(
                 name="earth_visibility",
@@ -198,11 +225,14 @@ def load_site(cap_psr_m: float = 2000.0) -> dict:
                 projection=proj_txt,
                 kind="interpolated",
                 units="fraction (resampled)",
-                notes="PDS AVGVISIB Earth 85S 60 m (DN×4e-5), bilinear onto 5 m. Optimistic vs DSN (any Earth disk).",
+                notes=(
+                    "PDS AVGVISIB Earth 85S 60 m (DN×4e-5), bilinear onto 5 m. Optimistic vs DSN (any Earth disk). "
+                    + ("Documented PDS factor applied here (no GeoTIFF scale tag)." if earth_fallback else "Scale from GeoTIFF tag.")
+                ),
             )
         )
     if paths.PSR_RASTER.exists():
-        psr_raw = _reproject_to(
+        psr_raw, _ = _reproject_to(
             paths.PSR_RASTER,
             {**profile, "height": dem.shape[0], "width": dem.shape[1], "crs": dem_src.crs, "transform": dem_src.transform},
             resampling=Resampling.nearest,
@@ -218,7 +248,10 @@ def load_site(cap_psr_m: float = 2000.0) -> dict:
                 projection=proj_txt,
                 kind="interpolated",
                 units="binary mask",
-                notes="PDS LPSR 85S 60 m, nearest-neighbour onto 5 m. Distance computed from this mask.",
+                notes=(
+                    "PDS LPSR 85S 60 m, nearest-neighbour onto 5 m. Distance-to-PSR is computed on a "
+                    "4× coarsened (25 m) grid and upsampled, so it is quantised to ~25 m."
+                ),
             )
         )
 

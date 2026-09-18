@@ -33,25 +33,21 @@ def _finite01(a: np.ndarray) -> np.ndarray:
     return out
 
 
-def _norm_higher(a: np.ndarray) -> np.ndarray:
-    a = _finite01(a)
-    lo, hi = np.nanpercentile(a, 2), np.nanpercentile(a, 98)
-    if not np.isfinite(lo) or hi <= lo:
-        return np.zeros_like(a)
-    return np.clip((a - lo) / (hi - lo), 0, 1)
-
-
 def _maybe_unit_interval(a: np.ndarray) -> np.ndarray:
-    """Expect a 0–1 fraction after ingest applies PDS scale. Percent maps still accepted."""
+    """Expect a 0–1 fraction after ingest applies the PDS scale; percent also accepted.
+
+    Raw DN (max ≫ 100) is NOT rescaled by the in-window maximum: that would invent a
+    fraction and make the best pixel in this window look perfectly lit. The criterion
+    is returned as NaN instead, which zeroes it and leaves the layer flagged.
+    """
     a = _finite01(a)
     mx = np.nanmax(a)
     if not np.isfinite(mx):
         return a
-    if mx > 1.5 and mx <= 100.5:
-        a = a / 100.0
-    elif mx > 100.5:
-        # Last resort only — ingest should already have applied GeoTIFF scale.
-        a = a / mx
+    if 1.5 < mx <= 100.5:
+        return np.clip(a / 100.0, 0, 1)
+    if mx > 100.5:
+        return np.full_like(a, np.nan)
     return np.clip(a, 0, 1)
 
 
@@ -74,9 +70,11 @@ def criterion_maps(bundle: dict, slope_max: float = 15.0, cap_m: float = 2000.0)
     else:
         c_comms = _maybe_unit_interval(bundle["earth"]).astype(np.float32)
 
-    count = bundle["count"]
-    cmax = np.nanmax(count)
-    conf = np.clip(count / max(cmax, 1e-6), 0, 1)
+    # A pixel with at least one LOLA return is measured; only pixels the LDEM had to
+    # interpolate (count < 1) take the full penalty. Normalising by the maximum count
+    # instead would penalise a measured pixel almost as hard as an empty one.
+    count = np.nan_to_num(bundle["count"], nan=0.0)
+    conf = np.clip(count, 0.0, 1.0)
     penalty = CONF_PENALTY_MAX * (1.0 - conf)
 
     hard = (slope <= slope_max) & np.isfinite(slope) & np.isfinite(bundle["dem"])
@@ -164,11 +162,26 @@ def top_sites(scored: dict, bundle: dict, n: int = 5, min_sep_m: float = 500.0) 
 
 
 def describe_pixel(scored: dict, r: int, c: int) -> str:
-    total = float(scored["score"][r, c])
+    """Human-readable breakdown. The printed arithmetic closes exactly.
+
+    score = (weighted criteria) − (confidence penalty), where the penalty is a
+    fraction of the weighted sum, not a flat subtraction.
+    """
     parts = scored["contrib"]
-    pen = float(scored["criteria"]["penalty"][r, c])
-    bits = " + ".join(f"{k} {parts[k][r, c]:.2f}" for k in ("slope", "illum", "psr", "comms"))
-    return f"score {total:.2f} = {bits}, confidence penalty −{pen:.2f}"
+    keys = ("slope", "illum", "psr", "comms")
+    raw = float(sum(float(parts[k][r, c]) for k in keys))
+    pen_frac = float(scored["criteria"]["penalty"][r, c])
+    total = float(scored["score"][r, c])
+    bits = " + ".join(f"{k} {float(parts[k][r, c]):.2f}" for k in keys)
+    if not bool(scored["criteria"]["hard_mask"][r, c]):
+        return f"score 0.00 — excluded by the hard slope mask (criteria alone would give {raw:.2f})"
+    if pen_frac <= 0.0005:
+        return f"score {total:.2f} = {bits} — no confidence penalty (LOLA-measured pixel)"
+    lost = max(raw - total, 0.0)
+    return (
+        f"score {total:.2f} = {bits} = {raw:.2f} − {lost:.2f} confidence penalty"
+        f" ({pen_frac * 100:.0f}% of {raw:.2f} — no LOLA return at this pixel)"
+    )
 
 
 def sensitivity(bundle: dict, weights: dict, n: int = 5, delta: float = 0.20) -> dict:

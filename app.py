@@ -8,19 +8,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-import geopandas as gpd
 import pandas as pd
 import streamlit as st
-from shapely.geometry import Point, shape
+from shapely.geometry import Point
 from streamlit_folium import st_folium
 
 from src import paths
 from src.conflict import find_conflicts
 from src.crs import to_lonlat
 from src.ingest import load_site, raster_center_lonlat
-from src.registry import buffer_features, load_registry, seed_whatif
+from src.registry import append_whatif, buffer_features, load_registry, seed_whatif
 from src.score import DEFAULT_WEIGHTS, describe_pixel, score, sensitivity, top_sites
-from src.viz import figure_conflict, figure_score_map, make_folium_map, save_overlay_png, score_rgba
+from src.viz import figure_conflict, figure_score_map, make_folium_map, pixel_from_leaflet, score_rgba
 
 st.set_page_config(page_title="LUNAR SITE INTELLIGENCE", layout="wide")
 
@@ -46,16 +45,6 @@ def _registry(bundle):
             gdf.loc[m, "lat"] = lat
             gdf.loc[m, "geometry"] = [Point(lon, lat)] * int(m.sum())
     return gdf
-
-
-def pixel_from_click(bundle, leaflet_lat, leaflet_lng):
-    """Leaflet Simple CRS: lng=column, lat=h-row (origin upper)."""
-    h, w = bundle["dem"].shape
-    r = int(round(h - leaflet_lat))
-    c = int(round(leaflet_lng))
-    if 0 <= r < h and 0 <= c < w:
-        return r, c
-    return None
 
 
 def main():
@@ -99,13 +88,11 @@ def main():
     polar = buffer_features(gdf, user_buffers=user_buf)
     conflicts = find_conflicts(gdf, user_buffers=user_buf)
 
-    overlay = paths.DERIVED / "score_overlay.png"
     rgba = score_rgba(
         scored["score"] if show_score else scored["score"] * 0,
         bundle["hillshade"],
         scored["criteria"]["hard_mask"] if show_score else scored["criteria"]["hard_mask"] & False,
     )
-    save_overlay_png(rgba, overlay)
 
     with tab_map:
         left, right = st.columns([1.4, 1])
@@ -126,10 +113,11 @@ def main():
             out = st_folium(fmap, height=640, returned_objects=["last_clicked"], use_container_width=True)
             clicked = (out or {}).get("last_clicked")
             if clicked:
-                rpix = pixel_from_click(bundle, float(clicked["lat"]), float(clicked["lng"]))
+                h, w = bundle["dem"].shape
+                rpix = pixel_from_leaflet(clicked["lat"], clicked["lng"], h, w)
                 if rpix:
                     r, c = rpix
-                    x_m, y_m = bundle["transform"] * (c + 0.5, r + 0.5)
+                    x_m, y_m = bundle["transform"] @ (c + 0.5, r + 0.5)
                     lon, lat = to_lonlat(bundle["crs"]).transform(x_m, y_m)
                     st.subheader("Pixel breakdown")
                     st.write(describe_pixel(scored, r, c))
@@ -147,12 +135,7 @@ def main():
                         }
                     )
                     feat = seed_whatif(lat, lon, str(wi_start), str(wi_end))
-                    extra = gpd.GeoDataFrame(
-                        [{**feat["properties"], "geometry": shape(feat["geometry"])}],
-                        crs=gdf.crs,
-                    )
-                    extra = gpd.GeoDataFrame(pd.concat([gdf, extra], ignore_index=True), crs=gdf.crs)
-                    wi_cf = find_conflicts(extra, user_buffers=user_buf)
+                    wi_cf = find_conflicts(append_whatif(gdf, feat), user_buffers=user_buf)
                     hit = wi_cf[(wi_cf["a"] == "what-if lander") | (wi_cf["b"] == "what-if lander")]
                     st.markdown("**What-if conflicts for a lander at this click**")
                     if hit.empty:
@@ -198,9 +181,11 @@ def main():
                 st.success(str(paths.FIGURES / "conflict_demo.png"))
 
             with st.expander("Weight sensitivity ±20%"):
-                sens = sensitivity(bundle, scored["weights"])
-                st.dataframe(pd.DataFrame(sens["rows"]), hide_index=True)
-                st.write("All perturbations keep the same top-5:", "yes" if sens["all_stable"] else "no")
+                st.caption("Re-scores the whole grid 8 times (a few seconds) — run it on demand.")
+                if st.button("Run sensitivity"):
+                    sens = sensitivity(bundle, scored["weights"])
+                    st.dataframe(pd.DataFrame(sens["rows"]), hide_index=True)
+                    st.write("All perturbations keep the same top-5:", "yes" if sens["all_stable"] else "no")
 
     with tab_limits:
         limits = ROOT / "DATA_LIMITS.md"

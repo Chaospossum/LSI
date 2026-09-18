@@ -7,7 +7,7 @@ This is a **landing-site screening tool**, not a survey-grade site certificate. 
 - Source: PGDA high-resolution south-pole site products (Barker et al. 2021, PSS).
 - Grid: 5 m/pixel, south polar stereographic, MOON_ME / DE421.
 - **~90% of 5 m polar LOLA pixels are interpolated between tracks.** LOLA’s cross-track and inter-spot spacing does not fill a 5 m grid. The LDEM looks continuous because empty pixels are filled.
-- Use the **LDEC count map**: pixels with count &lt; 1 have **no LOLA spot**. Those elevations are interpolated. This prototype applies a **confidence penalty** (not a 5th weight) from that count map.
+- Use the **LDEC count map**: pixels with count &lt; 1 have **no LOLA spot**. Those elevations are interpolated. This prototype applies a **confidence penalty** (not a 5th weight) from that count map: a pixel with at least one LOLA return keeps its full score, a pixel with none loses **15%** of its weighted score. Nothing in between — the count map answers *measured or not*, not *how well measured*.
 - Median RMS height error on these products is on the order of **0.3–0.5 m**; slope RMS **~1.5–2.5°** (Barker et al. 2021). Interpolation error grows with gap size and slope.
 - The 5 m slope GeoTIFF is derived from the interpolated LDEM. It is **not** an independent 5 m measurement.
 
@@ -17,12 +17,14 @@ This is a **landing-site screening tool**, not a survey-grade site certificate. 
 - The app uses Mazarico / LOLA **18.6-year mean** solar illumination and Earth-visibility maps at **60 m/pixel**, resampled onto the 5 m grid.
 - Kind: **interpolated** (coarser modeled maps, bilinear onto 5 m). These are **not** 5 m measurements.
 - Earth-visibility maps treat the Earth as a disc (any unobscured limb counts). That is **optimistic** versus a DSN radio link.
-- If those files are missing, do not invent values: that criterion is zeroed and the layer is marked absent in metadata.
+- DN → fraction uses the documented PDS factor (**×4e-5**). If the GeoTIFF carries no scale tag the factor is applied explicitly and `layers.json` records that it came from the PDS label rather than the file.
+- If those files are missing, do not invent values: that criterion is zeroed and the layer is marked absent in metadata. A map that still looks like raw DN after scaling is **not** stretched to 0–1 by its in-window maximum — that would invent a fraction — the criterion is dropped instead.
 
 ## Permanently shadowed regions
 
-- Distance-to-PSR uses a **60 m** LPSR raster (and, if present, Barker 2023 PSRs &gt; 1 km²) aligned to Site04.
+- Distance-to-PSR uses the **60 m** LPSR raster aligned to Site04. Vector PSR products (Barker 2023, &gt; 1 km²) are **not** used.
 - Kind: **interpolated** onto 5 m. Small PSRs and 5 m shadow edges are **not** resolved.
+- The distance transform runs on a **4× coarsened (25 m) grid** and is upsampled, so distance-to-PSR is quantised to ~25 m and capped at 2 km.
 
 ## Registry coordinates
 

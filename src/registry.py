@@ -1,14 +1,13 @@
 """Planned-operation registry. Coordinates are never silently upgraded from placeholder."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import geopandas as gpd
 from shapely.geometry import Point, mapping, shape
 
 from src import paths
-from src.crs import LONLAT_CRS, STEREO_CRS, to_stereo
+from src.crs import LONLAT_CRS, STEREO_CRS
 
 KIND_BUFFER_M = {"lander": 2000.0, "rover": 500.0, "infrastructure": 1000.0}
 
@@ -87,8 +86,3 @@ def append_whatif(gdf: gpd.GeoDataFrame, feat: dict) -> gpd.GeoDataFrame:
     )
     return gpd.pd.concat([gdf, extra], ignore_index=True)
 
-
-def write_registry(gdf: gpd.GeoDataFrame, path: Path | None = None) -> None:
-    path = path or paths.REGISTRY
-    out = gdf.to_crs(LONLAT_CRS) if gdf.crs else gdf
-    path.write_text(json.dumps(json.loads(out.to_json()), indent=2))

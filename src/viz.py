@@ -14,8 +14,22 @@ import numpy as np
 
 def _rowcol(transform, x, y, h):
     """Stereo metres → Leaflet Simple coords. origin=upper ⇒ leaflet_y = h - row."""
-    col, row = ~transform * (x, y)
+    col, row = (~transform) @ (x, y)
     return [h - float(row), float(col)]
+
+
+def pixel_from_leaflet(lat, lng, h, w):
+    """Inverse of _rowcol: Leaflet Simple (lat, lng) → raster (row, col).
+
+    _rowcol emits continuous coordinates, so a click inside pixel `row` arrives as
+    lat ∈ (h-row-1, h-row]. floor is the exact inverse; round() would land one pixel
+    off for half the grid and push the last row/column outside the raster.
+    """
+    r = int(np.floor(h - float(lat)))
+    c = int(np.floor(float(lng)))
+    if 0 <= r < h and 0 <= c < w:
+        return r, c
+    return None
 
 
 def make_folium_map(
@@ -116,25 +130,27 @@ def make_folium_map(
 
 
 def score_rgba(score: np.ndarray, hill: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """Hillshade always visible (offline basemap); viridis only on scored pixels."""
+    """Hillshade always visible (offline basemap); viridis only on scored pixels.
+
+    Built through a 256-entry uint8 LUT in integer arithmetic: calling the colormap
+    on the full grid returns float64 RGBA (~0.6 GB on a Site04-sized raster) and the
+    laptop this has to demo on does not have that to spare.
+    """
     s = np.nan_to_num(score, nan=0.0)
     hs = np.clip(np.nan_to_num(hill, nan=0.4), 0, 1)
-    gray = np.stack([hs, hs, hs], axis=-1)
+    gray = (hs * 255.0).astype(np.uint8)
     vmax = np.percentile(s[mask], 98) if mask.any() else 1.0
     vmax = max(float(vmax), 1e-6)
-    n = np.clip(s / vmax, 0, 1)
-    color = np.asarray(plt.get_cmap("viridis")(n))[..., :3]
+    idx = (np.clip(s / vmax, 0, 1) * 255.0).astype(np.uint8)
+    lut = (np.asarray(plt.get_cmap("viridis")(np.linspace(0, 1, 256)))[:, :3] * 255.0).astype(np.uint8)
+    color = lut[idx]  # H×W×3 uint8
+    # 0.40 hillshade + 0.60 viridis, exactly, without leaving integers
+    blend = ((2 * gray[..., None].astype(np.uint16) + 3 * color.astype(np.uint16)) // 5).astype(np.uint8)
     use = (mask & (s > 0))[..., None]
-    rgb = np.where(use, 0.40 * gray + 0.60 * color, gray)
-    rgba = np.concatenate([rgb, np.ones((*hs.shape, 1))], axis=-1)
-    return (np.clip(rgba, 0, 1) * 255).astype(np.uint8)
-
-
-def save_overlay_png(rgba: np.ndarray, dest: Path) -> Path:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    plt.imsave(dest, rgba)
-    return dest
-
+    rgba = np.empty((*hs.shape, 4), dtype=np.uint8)
+    rgba[..., :3] = np.where(use, blend, gray[..., None])
+    rgba[..., 3] = 255
+    return rgba
 
 
 
@@ -175,7 +191,7 @@ def figure_conflict(bundle, scored, registry_polar, conflicts_df, dest: Path) ->
     )
 
     def xy_to_colrow(x, y):
-        col, row = ~t * (x, y)
+        col, row = (~t) @ (x, y)
         return col, row
 
     for _, row in registry_polar.iterrows():

@@ -34,4 +34,6 @@ After the download, `streamlit run app.py` is the demo command. No tiles, no API
 
 `app.py` · `src/{ingest,score,registry,conflict,viz}.py` · `registry/sites.geojson` · `scripts/download_data.py` · `data/` (gitignored)
 
-Weights (slope, illumination, near-PSR, Earth visibility) sum to 1. Hard mask: slope &gt; 15° (slider). LOLA count is a **penalty**, not a criterion. Placeholders in the registry stay labelled placeholder.
+Weights (slope, illumination, near-PSR, Earth visibility) sum to 1. Hard mask: slope &gt; 15° (slider). LOLA count is a **penalty**, not a criterion: a pixel with no LOLA return loses 15% of its score. Placeholders in the registry stay labelled placeholder. Weight-sensitivity (±20%) re-scores the grid 8 times, so it runs on a button, not on every slider move.
+
+Before a demo, `python scripts/download_data.py --check` HEADs every source URL and downloads nothing.
