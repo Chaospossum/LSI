@@ -51,7 +51,7 @@ def _maybe_unit_interval(a: np.ndarray) -> np.ndarray:
     return np.clip(a, 0, 1)
 
 
-def criterion_maps(bundle: dict, slope_max: float = 15.0, cap_m: float = 2000.0) -> dict:
+def criterion_maps(bundle: dict, slope_max: float = 15.0, cap_m: float = 2000.0, exclude_psr: bool = True) -> dict:
     slope = bundle["slope"]
     c_slope = np.clip(1.0 - slope / slope_max, 0, 1).astype(np.float32)
 
@@ -78,6 +78,9 @@ def criterion_maps(bundle: dict, slope_max: float = 15.0, cap_m: float = 2000.0)
     penalty = CONF_PENALTY_MAX * (1.0 - conf)
 
     hard = (slope <= slope_max) & np.isfinite(slope) & np.isfinite(bundle["dem"])
+    if exclude_psr and bundle.get("psr") is not None:
+        # Solar-lander screening: do not rank pads *inside* a PSR. Proximity stays a criterion.
+        hard = hard & (np.nan_to_num(bundle["psr"], nan=0.0) < 0.5)
     warn = (slope > 8.0) & hard
 
     return {
@@ -100,9 +103,15 @@ def normalize_weights(weights: dict) -> dict:
     return {k: v / s for k, v in w.items()}
 
 
-def score(bundle: dict, weights: dict | None = None, slope_max: float = 15.0, cap_m: float = 2000.0) -> dict:
+def score(
+    bundle: dict,
+    weights: dict | None = None,
+    slope_max: float = 15.0,
+    cap_m: float = 2000.0,
+    exclude_psr: bool = True,
+) -> dict:
     w = normalize_weights(weights or DEFAULT_WEIGHTS)
-    c = criterion_maps(bundle, slope_max=slope_max, cap_m=cap_m)
+    c = criterion_maps(bundle, slope_max=slope_max, cap_m=cap_m, exclude_psr=exclude_psr)
     contrib = {}
     acc = np.zeros(bundle["dem"].shape, dtype=np.float32)
     for k in ("slope", "illum", "psr", "comms"):

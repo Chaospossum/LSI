@@ -49,6 +49,6 @@ the error model is printed with its source (or labelled *assumed*). See `DATA_LI
 
 `app.py` · `src/{ingest,score,uncertainty,registry,conflict,viz}.py` · `registry/sites.geojson` · `scripts/download_data.py` · `data/` (gitignored)
 
-Weights (slope, illumination, near-PSR, Earth visibility) sum to 1. Hard mask: slope &gt; 15° (slider). LOLA count is a **penalty**, not a criterion: a pixel with no LOLA return loses 15% of its score. Placeholders in the registry stay labelled placeholder. Weight-sensitivity (±20%) re-scores the grid 8 times, so it runs on a button, not on every slider move.
+Weights (slope, illumination, near-PSR, Earth visibility) sum to 1. Hard mask: slope &gt; 15° (slider) and, by default, **PSR interiors**. LOLA count is a **penalty**, not a criterion: a pixel with no LOLA return loses 15% of its score. Ranking Monte Carlo uses Barker `slperr.tif` per-pixel slope RMS when that file is present, and `toterr.tif` height RMS is shown on inspect (not scored). The **Data & limits** tab lists the published citations (DOIs) attached to every layer. Placeholders in the registry stay labelled placeholder. Weight-sensitivity (±20%) re-scores the grid 8 times, so it runs on a button, not on every slider move.
 
 Before a demo, `python scripts/download_data.py --check` HEADs every source URL and downloads nothing.

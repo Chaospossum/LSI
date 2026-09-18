@@ -44,8 +44,9 @@ Earth-visibility carry a representativeness error from the 60 m → 5 m resampli
 estimated per site from the local variability of the coarse field, plus a relative
 scale uncertainty. Distance-to-PSR carries the 60 m mask resolution.
 
-None of these σ are measured by this prototype. They are read from Barker et al.
-(2021) where published and assumed otherwise — see DATA_LIMITS.md.
+None of these σ are measured by this prototype except where a Barker clone-ensemble
+RMS GeoTIFF is present (slperr). Other terms are read from Barker et al. (2021)
+where published and assumed otherwise — see DATA_LIMITS.md.
 """
 from __future__ import annotations
 
@@ -101,10 +102,15 @@ class ErrorModel:
     """Dirichlet spread on the weights, matched to the ±20% the OAT report used, so the
     two are comparable."""
 
-    def slope_sigma(self, interpolated: np.ndarray) -> np.ndarray:
-        return np.where(
+    def slope_sigma(self, interpolated: np.ndarray, measured_err: np.ndarray | None = None) -> np.ndarray:
+        fallback = np.where(
             interpolated, self.slope_rms_interpolated_deg, self.slope_rms_measured_deg
         ).astype(np.float32)
+        if measured_err is None:
+            return fallback
+        err = np.asarray(measured_err, dtype=np.float32)
+        use = np.isfinite(err) & (err > 0)
+        return np.clip(np.where(use, err, fallback), 0.2, 20.0).astype(np.float32)
 
 
 # ----------------------------------------------------------------------------- windows
@@ -313,7 +319,10 @@ def monte_carlo(
                     None if bundle["psr_dist"] is None
                     else np.asarray(_patch(bundle["psr_dist"], r, c, rad), dtype=np.float32)
                 ),
-                "sigma_slope": m.slope_sigma(_patch(bundle["interpolated"], r, c, rad)),
+                "sigma_slope": m.slope_sigma(
+                    _patch(bundle["interpolated"], r, c, rad),
+                    None if bundle.get("slope_err") is None else _patch(bundle["slope_err"], r, c, rad),
+                ),
                 "penalty": np.asarray(_patch(fp["criteria"]["penalty"], r, c, rad), dtype=np.float32),
             }
         )
@@ -471,21 +480,36 @@ def spearman_matrix(bundle: dict, fp: dict, n_sample: int = 200_000, seed: int =
     return pd.DataFrame(np.round(m, 3), index=keys, columns=keys)
 
 
-def assumptions_table(model: ErrorModel) -> pd.DataFrame:
+def assumptions_table(model: ErrorModel, bundle: dict | None = None) -> pd.DataFrame:
     src = {
-        "slope_rms_measured_deg": "Barker et al. 2021 (verify table)",
-        "slope_rms_interpolated_deg": "Barker et al. 2021 (verify table)",
+        "slope_rms_measured_deg": "fallback if slperr.tif missing; Barker et al. 2021 doi:10.1016/j.pss.2020.105119",
+        "slope_rms_interpolated_deg": "fallback for empty/NaN slperr pixels; Barker et al. 2021",
         "slope_bias_sigma_deg": "assumed",
         "slope_correlation_length_m": "assumed",
         "correlated_variance_fraction": "assumed",
         "visib_relative_sigma": "assumed",
         "visib_representativeness_k": "assumed",
-        "psr_distance_sigma_m": "product resolution (60 m LPSR)",
+        "psr_distance_sigma_m": "product resolution (Mazarico 2011 60 m LPSR)",
         "weight_relative_sigma": "chosen to match the ±20% OAT report",
     }
-    return pd.DataFrame(
-        [{"parameter": k, "value": v, "source": src[k]} for k, v in asdict(model).items()]
+    rows = [{"parameter": k, "value": v, "source": src[k]} for k, v in asdict(model).items()]
+    slperr = None if bundle is None else bundle.get("slope_err")
+    toterr = None if bundle is None else bundle.get("height_err")
+    rows.append(
+        {
+            "parameter": "slope_sigma_map",
+            "value": "Site04 slperr.tif (per-pixel RMS °)" if slperr is not None else "constant fallback only",
+            "source": "Barker et al. 2021 PGDA Site04 slope uncertainty; doi:10.1016/j.pss.2020.105119",
+        }
     )
+    rows.append(
+        {
+            "parameter": "height_rms_map",
+            "value": "Site04 toterr.tif (per-pixel RMS m)" if toterr is not None else "absent",
+            "source": "Barker et al. 2021 PGDA Site04 total Z uncertainty. Displayed; not a score input.",
+        }
+    )
+    return pd.DataFrame(rows)
 
 
 def main() -> None:
@@ -512,7 +536,7 @@ def main() -> None:
     print("\nCriterion rank correlation (high |ρ| ⇒ the criteria are not independent evidence):")
     print(spearman_matrix(bundle, fp).to_string())
     print("\nError model — these drive every interval above:")
-    print(assumptions_table(mc["model"]).to_string(index=False))
+    print(assumptions_table(mc["model"], bundle).to_string(index=False))
     print("\nThe index is a preference score, not a probability of mission success.")
 
     dest = Path(args.out_csv)

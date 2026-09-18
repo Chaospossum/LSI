@@ -14,6 +14,7 @@ from shapely.geometry import Point
 from streamlit_folium import st_folium
 
 from src import paths
+from src.citations import citations_table
 from src.conflict import conflict_probability, find_conflicts
 from src.crs import to_lonlat
 from src.ingest import load_site, raster_center_lonlat
@@ -66,6 +67,11 @@ def _registry(bundle):
 def main():
     st.title("LUNAR SITE INTELLIGENCE")
     st.caption("Shackleton rim (PGDA Site04) screening tool — not survey-grade. Placeholders are labelled.")
+    st.info(
+        "Measured: LOLA count. Published error maps: Barker slperr (slope RMS) and toterr (height RMS). "
+        "Interpolated: 5 m DEM/slope (~91% of pixels) and 60 m illum/Earth/PSR. "
+        "Assumed: MC correlation length and weight Dirichlet. Preference index, not P(success)."
+    )
 
     try:
         bundle = _bundle()
@@ -90,13 +96,15 @@ def main():
         show_score = st.checkbox("score + hillshade overlay", True)
         show_buffers = st.checkbox("registry buffers", True)
         show_conflicts = st.checkbox("conflict highlights", True)
+        exclude_psr = st.checkbox("hard-exclude PSR interiors", True)
+        st.caption("Solar-lander screening: stay out of permanent shadow; proximity to PSR is still a criterion.")
         st.header("What-if lander")
         st.caption("Click the map. Dates default to 2027 so they overlap the seeded landers.")
         wi_start = st.date_input("t_start", value=dt.date(2027, 6, 1))
         wi_end = st.date_input("t_end", value=dt.date(2027, 12, 31))
 
     weights = {"slope": w_slope, "illum": w_illum, "psr": w_psr, "comms": w_comms}
-    scored = score(bundle, weights, slope_max=slope_max)
+    scored = score(bundle, weights, slope_max=slope_max, exclude_psr=exclude_psr)
     sites = top_sites(scored, bundle, n=5)
 
     gdf = _registry(bundle)
@@ -137,8 +145,7 @@ def main():
                     lon, lat = to_lonlat(bundle["crs"]).transform(x_m, y_m)
                     st.subheader("Pixel breakdown")
                     st.write(describe_pixel(scored, r, c))
-                    st.json(
-                        {
+                    pix = {
                             "row": r,
                             "col": c,
                             "x_m": float(x_m),
@@ -148,8 +155,12 @@ def main():
                             "slope_deg": float(bundle["slope"][r, c]),
                             "count": float(bundle["count"][r, c]),
                             "interpolated": bool(bundle["interpolated"][r, c]),
-                        }
-                    )
+                    }
+                    if bundle.get("slope_err") is not None:
+                        pix["slope_err_deg_rms"] = float(bundle["slope_err"][r, c])
+                    if bundle.get("height_err") is not None:
+                        pix["height_err_m_rms"] = float(bundle["height_err"][r, c])
+                    st.json(pix)
                     feat = seed_whatif(lat, lon, str(wi_start), str(wi_end))
                     wi_cf = find_conflicts(append_whatif(gdf, feat), user_buffers=user_buf)
                     hit = wi_cf[(wi_cf["a"] == "what-if lander") | (wi_cf["b"] == "what-if lander")]
@@ -217,7 +228,7 @@ def main():
         )
         c1, c2, c3 = st.columns(3)
         radius_m = c1.slider("pad radius (m)", 10, 200, 50, 5)
-        n_draws = c2.select_slider("Monte-Carlo draws", [200, 500, 1000, 2000, 5000], value=1000)
+        n_draws = c2.select_slider("Monte-Carlo draws", [200, 500, 1000, 2000, 5000], value=200)
         n_cand = c3.slider("candidate pool", 5, 50, 25, 5)
         if st.button("Run ranking statistics", type="primary"):
             with st.spinner("Propagating input and weight uncertainty…"):
@@ -236,7 +247,7 @@ def main():
                 st.markdown("**Criterion rank correlation** — high |ρ| means two criteria are the same evidence twice.")
                 st.dataframe(spearman_matrix(bundle, fp), use_container_width=True)
                 st.markdown("**Error model** — every interval above depends on these. Assumed values are labelled.")
-                st.dataframe(assumptions_table(mc["model"]), hide_index=True, use_container_width=True)
+                st.dataframe(assumptions_table(mc["model"], bundle), hide_index=True, use_container_width=True)
                 if st.button("Export ranking_intervals.png"):
                     figure_ranking_intervals(mc, paths.FIGURES / "ranking_intervals.png")
                     st.success(str(paths.FIGURES / "ranking_intervals.png"))
@@ -259,15 +270,29 @@ def main():
             )
 
     with tab_limits:
+        st.subheader("Published citations")
+        st.dataframe(citations_table(), hide_index=True, use_container_width=True)
+        st.caption("These are the papers and product pages the rasters and registry points actually come from.")
         limits = ROOT / "DATA_LIMITS.md"
         st.markdown(limits.read_text() if limits.exists() else "_DATA_LIMITS.md missing_")
         st.subheader("Layer metadata")
-        st.json(
-            {
-                "layers": [x.__dict__ if hasattr(x, "__dict__") else x for x in bundle["layers"]],
-                "summary": bundle["summary"],
-            }
-        )
+        layer_rows = []
+        for x in bundle["layers"]:
+            d = x.__dict__ if hasattr(x, "__dict__") else dict(x)
+            layer_rows.append(
+                {
+                    "name": d.get("name"),
+                    "kind": d.get("kind"),
+                    "units": d.get("units"),
+                    "resolution_m": d.get("resolution_m"),
+                    "doi": d.get("doi") or "—",
+                    "citation": d.get("citation"),
+                    "source_url": d.get("source_url"),
+                    "notes": d.get("notes"),
+                }
+            )
+        st.dataframe(pd.DataFrame(layer_rows), hide_index=True, use_container_width=True)
+        st.json({"summary": bundle["summary"]})
 
 
 if __name__ == "__main__":

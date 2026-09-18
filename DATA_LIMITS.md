@@ -10,6 +10,8 @@ This is a **landing-site screening tool**, not a survey-grade site certificate. 
 - Use the **LDEC count map**: pixels with count &lt; 1 have **no LOLA spot**. Those elevations are interpolated. This prototype applies a **confidence penalty** (not a 5th weight) from that count map: a pixel with at least one LOLA return keeps its full score, a pixel with none loses **15%** of its weighted score. Nothing in between — the count map answers *measured or not*, not *how well measured*.
 - Median RMS height error on these products is on the order of **0.3–0.5 m**; slope RMS **~1.5–2.5°** (Barker et al. 2021). Interpolation error grows with gap size and slope.
 - The 5 m slope GeoTIFF is derived from the interpolated LDEM. It is **not** an independent 5 m measurement.
+- When present, `Site04_final_adj_5mpp_slperr.tif` (Barker clone-ensemble slope RMS) is used as **per-pixel σ** in the ranking Monte Carlo instead of a single assumed 1.5–2.5°. The assumed correlation length still applies.
+- When present, `Site04_final_adj_5mpp_toterr.tif` (total Z RMS, metres) is shown on pixel inspect. It is **not** a scoring input.
 
 ## Illumination and Earth visibility (60 m → 5 m)
 
@@ -25,18 +27,27 @@ This is a **landing-site screening tool**, not a survey-grade site certificate. 
 - Distance-to-PSR uses the **60 m** LPSR raster aligned to Site04. Vector PSR products (Barker 2023, &gt; 1 km²) are **not** used.
 - Kind: **interpolated** onto 5 m. Small PSRs and 5 m shadow edges are **not** resolved.
 - The distance transform runs on a **4× coarsened (25 m) grid** and is upsampled, so distance-to-PSR is quantised to ~25 m and capped at 2 km.
+- Default scoring **hard-excludes PSR interiors** (`exclude_psr=True`). Near-PSR remains a criterion for solar-lander screening; uncheck the app box to score inside shadow.
 
 ## Registry coordinates
 
 - `coord_source` is one of `published` | `approximate` | `placeholder`.
 - **Placeholder points are not real landing sites.** Blue Moon MK1 Endurance, IM-4, and MAGPIE are demo geometry only.
 - Chang’e-7 (~88.8°S, 123.4°E) is **approximate** and may sit **outside** the Site04 5 m window. Conflicts still run in polar stereographic; pixel inspect only works on Site04.
-- NASA “Peak near Shackleton” uses the **published Site07 GeoTIFF centre**, not a NASA-announced pad.
+- NASA “Peak near Shackleton” in this registry is **two things, labelled separately**: the PGDA Site07 DEM centroid (`published` product centre, not a pad) and a literature Site 007 coordinate (`approximate`, LPSC 2024 1695). Neither is an official NASA landing pad.
 
 ## Map display
 
-- Leaflet **Web Mercator cannot show 90°S** (clips near 85°). The app map uses Leaflet **Simple CRS** with **south polar stereographic metres**. Click coordinates are (x, y) metres, converted to lon/lat only for the inspect panel and what-if lander.
-- This is still not a lunar web-tile globe. Report figures (`figures/*.png`) are the undistorted raster view.
+- Leaflet **Web Mercator cannot show 90°S** (clips near 85°). The interactive map uses Leaflet **Simple CRS in Site04 pixel coordinates** (north up). Report figures (`figures/*.png`) are the same undistorted raster.
+- This is still not a lunar web-tile globe.
+
+## Citations
+
+- Barker, M.K. et al. (2021), *Planet. Space Sci.* 203, 105119, doi:10.1016/j.pss.2020.105119 — 5 m LDEM, slope, count, slperr, toterr. PGDA: https://pgda.gsfc.nasa.gov/products/78
+- Mazarico, E. et al. (2011), *Icarus* 211, 1066–1081, doi:10.1016/j.icarus.2010.10.030 — polar illumination / Earth visibility / PSR products.
+- NASA (2022), Artemis III candidate regions: https://www.nasa.gov/news-release/nasa-identifies-candidate-regions-for-landing-next-americans-on-moon/
+- Kumari, N. et al. (2022), *Planet. Sci. J.* 3, 224, doi:10.3847/PSJ/ac88c2 — Sites 007 / 011 context.
+- Gracy, S. & Lee, P. (2024), 55th LPSC abstract 1695, https://www.hou.usra.edu/meetings/lpsc2024/pdf/1695.pdf — literature coordinates inside Peak Near Shackleton.
 
 ## Statistical validity — what the numbers support, and what they do not
 
@@ -69,8 +80,8 @@ assumption behind it.
 
 | Term | Value | Source |
 |---|---|---|
-| Slope RMS, measured pixels | 1.5° | Barker et al. 2021 — **verify the table before quoting** |
-| Slope RMS, interpolated pixels | 2.5° | Barker et al. 2021 — **verify** |
+| Slope RMS, measured pixels | 1.5° fallback | Barker `slperr.tif` when present; else Barker et al. 2021 median — **verify** |
+| Slope RMS, interpolated pixels | 2.5° fallback | same; empty pixels fall back if the error map is NaN/0 |
 | Systematic slope bias | σ = 0.5° | **assumed** — does not average away over a pad |
 | Slope error correlation length | 50 m | **assumed** — sets how much averaging buys |
 | Correlated share of slope variance | 0.7 | **assumed** |

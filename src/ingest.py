@@ -20,6 +20,7 @@ from rasterio.enums import Resampling
 from rasterio.warp import reproject
 
 from src import paths
+from src.citations import LAYER_CITE, get as get_cite
 from src.crs import LUNAR_SP_STEREO, stereo_from_raster, to_lonlat
 
 
@@ -39,6 +40,35 @@ class LayerMeta:
     kind: str  # measured | interpolated | proxy
     units: str
     notes: str
+    citation_key: str
+    doi: str
+    citation: str
+
+
+def _meta(
+    name: str,
+    path: Path,
+    source_url: str,
+    resolution_m: float,
+    projection: str,
+    kind: str,
+    units: str,
+    notes: str,
+) -> LayerMeta:
+    cite = get_cite(LAYER_CITE[name])
+    return LayerMeta(
+        name=name,
+        path=str(path),
+        source_url=source_url,
+        resolution_m=resolution_m,
+        projection=projection,
+        kind=kind,
+        units=units,
+        notes=notes,
+        citation_key=cite.key,
+        doi=cite.doi,
+        citation=cite.apa(),
+    )
 
 
 def _apply_scale(src, data: np.ndarray) -> np.ndarray:
@@ -155,37 +185,77 @@ def load_site(cap_psr_m: float = 2000.0) -> dict:
     proj_txt = crs.to_wkt() if crs else LUNAR_SP_STEREO
 
     layers = [
-        LayerMeta(
-            name="dem",
-            path=str(paths.SITE04_DEM),
-            source_url="https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site04/Site04_final_adj_5mpp_surf.tif",
-            resolution_m=pixel_m,
-            projection=proj_txt,
-            kind="interpolated",
-            units="m",
-            notes="LOLA 5 m LDEM; empty pixels filled by interpolation (Barker et al. 2021).",
+        _meta(
+            "dem",
+            paths.SITE04_DEM,
+            "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site04/Site04_final_adj_5mpp_surf.tif",
+            pixel_m,
+            proj_txt,
+            "interpolated",
+            "m",
+            "LOLA 5 m LDEM; empty pixels filled by interpolation. Barker et al. 2021.",
         ),
-        LayerMeta(
-            name="slope",
-            path=str(paths.SITE04_SLOPE),
-            source_url="https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site04/Site04_final_adj_5mpp_slp.tif",
-            resolution_m=pixel_m,
-            projection=proj_txt,
-            kind="interpolated",
-            units="deg",
-            notes="Slope derived from the interpolated LDEM, not independently measured at 5 m.",
+        _meta(
+            "slope",
+            paths.SITE04_SLOPE,
+            "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site04/Site04_final_adj_5mpp_slp.tif",
+            pixel_m,
+            proj_txt,
+            "interpolated",
+            "deg",
+            "Slope derived from the interpolated LDEM, not independently measured at 5 m.",
         ),
-        LayerMeta(
-            name="count",
-            path=str(paths.SITE04_COUNT),
-            source_url="https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site04/Site04_final_adj_5mpp_ldec.tif",
-            resolution_m=pixel_m,
-            projection=proj_txt,
-            kind="measured",
-            units="spots/pixel",
-            notes="LOLA return count. Pixels with count < 1 are interpolated in the LDEM.",
+        _meta(
+            "count",
+            paths.SITE04_COUNT,
+            "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site04/Site04_final_adj_5mpp_ldec.tif",
+            pixel_m,
+            proj_txt,
+            "measured",
+            "spots/pixel",
+            "LOLA return count. Pixels with count < 1 are interpolated in the LDEM.",
         ),
     ]
+
+    slope_err = None
+    if paths.SITE04_SLPERR.exists():
+        err_src, slope_err = _open_array(paths.SITE04_SLPERR)
+        err_src.close()
+        if slope_err.shape != dem.shape:
+            slope_err = None
+        else:
+            layers.append(
+                _meta(
+                    "slope_err",
+                    paths.SITE04_SLPERR,
+                    "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site04/Site04_final_adj_5mpp_slperr.tif",
+                    pixel_m,
+                    proj_txt,
+                    "interpolated",
+                    "deg RMS",
+                    "Barker clone-ensemble slope RMS. Per-pixel σ in ranking Monte Carlo when present.",
+                )
+            )
+
+    height_err = None
+    if paths.SITE04_TOTERR.exists():
+        z_src, height_err = _open_array(paths.SITE04_TOTERR)
+        z_src.close()
+        if height_err.shape != dem.shape:
+            height_err = None
+        else:
+            layers.append(
+                _meta(
+                    "height_err",
+                    paths.SITE04_TOTERR,
+                    "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site04/Site04_final_adj_5mpp_toterr.tif",
+                    pixel_m,
+                    proj_txt,
+                    "interpolated",
+                    "m RMS",
+                    "Barker clone-ensemble total Z RMS. Shown in inspect; scoring uses slope, not height.",
+                )
+            )
 
     illum = earth = psr = None
     if paths.ILLUM.exists():
@@ -195,15 +265,15 @@ def load_site(cap_psr_m: float = 2000.0) -> dict:
             fallback_scale=PDS_VISIB_SCALE,
         )
         layers.append(
-            LayerMeta(
-                name="illumination",
-                path=str(paths.ILLUM),
-                source_url="https://pgda.gsfc.nasa.gov/data/MoonIllumination/AVGVISIB_85S_060M_201608.TIF",
-                resolution_m=60.0,
-                projection=proj_txt,
-                kind="interpolated",
-                units="fraction (resampled)",
-                notes=(
+            _meta(
+                "illumination",
+                paths.ILLUM,
+                "https://pgda.gsfc.nasa.gov/data/MoonIllumination/AVGVISIB_85S_060M_201608.TIF",
+                60.0,
+                proj_txt,
+                "interpolated",
+                "fraction (resampled)",
+                (
                     "Mazarico/PDS AVGVISIB 85S 60 m (DN×4e-5 = 0–1 fraction), bilinear onto 5 m. "
                     "Not a 5 m measurement. Scale source: "
                     + ("documented PDS factor applied here (no GeoTIFF scale tag)." if illum_fallback else "GeoTIFF scale tag.")
@@ -217,15 +287,15 @@ def load_site(cap_psr_m: float = 2000.0) -> dict:
             fallback_scale=PDS_VISIB_SCALE,
         )
         layers.append(
-            LayerMeta(
-                name="earth_visibility",
-                path=str(paths.EARTH_VIS),
-                source_url="https://pgda.gsfc.nasa.gov/data/MoonIllumination/AVGVISIB_85S_060M_201608_EARTH.TIF",
-                resolution_m=60.0,
-                projection=proj_txt,
-                kind="interpolated",
-                units="fraction (resampled)",
-                notes=(
+            _meta(
+                "earth_visibility",
+                paths.EARTH_VIS,
+                "https://pgda.gsfc.nasa.gov/data/MoonIllumination/AVGVISIB_85S_060M_201608_EARTH.TIF",
+                60.0,
+                proj_txt,
+                "interpolated",
+                "fraction (resampled)",
+                (
                     "PDS AVGVISIB Earth 85S 60 m (DN×4e-5), bilinear onto 5 m. Optimistic vs DSN (any Earth disk). "
                     + ("Documented PDS factor applied here (no GeoTIFF scale tag)." if earth_fallback else "Scale from GeoTIFF tag.")
                 ),
@@ -240,15 +310,15 @@ def load_site(cap_psr_m: float = 2000.0) -> dict:
         # After PDS scale/offset, LPSR is ~0 (lit) or ~1 (permanently shadowed).
         psr = np.where(np.isnan(psr_raw), 0, (psr_raw > 0.5).astype(np.float32))
         layers.append(
-            LayerMeta(
-                name="psr",
-                path=str(paths.PSR_RASTER),
-                source_url="https://pgda.gsfc.nasa.gov/data/MoonIllumination/LPSR_85S_060M_201608.TIF",
-                resolution_m=60.0,
-                projection=proj_txt,
-                kind="interpolated",
-                units="binary mask",
-                notes=(
+            _meta(
+                "psr",
+                paths.PSR_RASTER,
+                "https://pgda.gsfc.nasa.gov/data/MoonIllumination/LPSR_85S_060M_201608.TIF",
+                60.0,
+                proj_txt,
+                "interpolated",
+                "binary mask",
+                (
                     "PDS LPSR 85S 60 m, nearest-neighbour onto 5 m. Distance-to-PSR is computed on a "
                     "4× coarsened (25 m) grid and upsampled, so it is quantised to ~25 m."
                 ),
@@ -293,6 +363,8 @@ def load_site(cap_psr_m: float = 2000.0) -> dict:
         "illum_present": illum is not None,
         "earth_present": earth is not None,
         "psr_present": psr is not None,
+        "slope_err_present": slope_err is not None,
+        "height_err_present": height_err is not None,
     }
 
     paths.DATA.mkdir(parents=True, exist_ok=True)
@@ -306,6 +378,8 @@ def load_site(cap_psr_m: float = 2000.0) -> dict:
         "earth": earth,
         "psr": psr,
         "psr_dist": psr_dist,
+        "slope_err": slope_err,
+        "height_err": height_err,
         "hillshade": hs,
         "interpolated": interpolated,
         "transform": dem_src.transform,

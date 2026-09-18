@@ -39,6 +39,7 @@ def _toy_bundle(n=50):
         "earth": earth.astype(np.float32),
         "psr": psr,
         "psr_dist": dist.astype(np.float32),
+        "slope_err": None,
         "hillshade": np.full((n, n), 0.5, np.float32),
         "interpolated": count < 1,
         "transform": from_origin(-8000, 8000, 5, 5),
@@ -48,6 +49,14 @@ def _toy_bundle(n=50):
         "layers": [],
         "summary": {},
     }
+
+
+def test_psr_hard_exclude():
+    b = _toy_bundle()
+    sc = score_fn(b, exclude_psr=True)
+    assert (sc["score"][b["psr"] > 0.5] == 0).all()
+    sc2 = score_fn(b, exclude_psr=False)
+    assert sc2["score"][b["psr"] > 0.5].max() > 0
 
 
 def test_score_shape_and_mask():
@@ -274,6 +283,8 @@ def test_ingest_end_to_end_on_synthetic_geotiffs(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "SITE04_DEM", raw / "dem.tif")
     monkeypatch.setattr(paths, "SITE04_SLOPE", raw / "slope.tif")
     monkeypatch.setattr(paths, "SITE04_COUNT", raw / "count.tif")
+    monkeypatch.setattr(paths, "SITE04_SLPERR", raw / "missing_slperr.tif")
+    monkeypatch.setattr(paths, "SITE04_TOTERR", raw / "missing_toterr.tif")
     monkeypatch.setattr(paths, "SITE07_DEM", raw / "missing.tif")
     monkeypatch.setattr(paths, "ILLUM", raw / "illum.tif")
     monkeypatch.setattr(paths, "EARTH_VIS", raw / "earth.tif")
@@ -295,6 +306,70 @@ def test_ingest_end_to_end_on_synthetic_geotiffs(tmp_path, monkeypatch):
     assert np.isfinite(sc["score"]).all() and sc["score"].max() > 0
     tops = top_sites(sc, b, n=3, min_sep_m=50)
     assert tops and -90 <= tops[0]["lat"] <= -80
+    assert all(getattr(L, "citation_key", None) for L in b["layers"])
+    b["dem_src"].close()
+
+
+def test_ingest_uses_matching_error_maps(tmp_path, monkeypatch):
+    import rasterio
+    from rasterio.transform import from_origin
+
+    from src import ingest, paths
+    from src.crs import STEREO_CRS
+
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    n = 40
+    tr = from_origin(-2000, 2000, 5, 5)
+    arr = np.ones((n, n), np.float32)
+    slperr = np.full((n, n), 1.2, np.float32)
+    toterr = np.full((n, n), 0.4, np.float32)
+
+    def wtif(path, a):
+        prof = dict(driver="GTiff", height=n, width=n, count=1, dtype="float32",
+                    crs=STEREO_CRS, transform=tr)
+        with rasterio.open(path, "w", **prof) as d:
+            d.write(a, 1)
+
+    wtif(raw / "dem.tif", arr * 1000)
+    wtif(raw / "slope.tif", arr * 3)
+    wtif(raw / "count.tif", arr)
+    wtif(raw / "slperr.tif", slperr)
+    wtif(raw / "toterr.tif", toterr)
+    monkeypatch.setattr(paths, "SITE04_DEM", raw / "dem.tif")
+    monkeypatch.setattr(paths, "SITE04_SLOPE", raw / "slope.tif")
+    monkeypatch.setattr(paths, "SITE04_COUNT", raw / "count.tif")
+    monkeypatch.setattr(paths, "SITE04_SLPERR", raw / "slperr.tif")
+    monkeypatch.setattr(paths, "SITE04_TOTERR", raw / "toterr.tif")
+    monkeypatch.setattr(paths, "SITE07_DEM", raw / "nope.tif")
+    monkeypatch.setattr(paths, "ILLUM", raw / "nope.tif")
+    monkeypatch.setattr(paths, "EARTH_VIS", raw / "nope.tif")
+    monkeypatch.setattr(paths, "PSR_RASTER", raw / "nope.tif")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LAYER_JSON", tmp_path / "layers.json")
+    b = ingest.load_site()
+    assert b["summary"]["slope_err_present"] and b["summary"]["height_err_present"]
+    assert b["slope_err"][0, 0] == 1.2
+    names = [L.name for L in b["layers"]]
+    assert names.count("slope_err") == 1 and "height_err" in names
+    assert all(L.doi or L.citation_key == "mazarico2011" or L.citation for L in b["layers"])
+    b["dem_src"].close()
+
+
+def test_citations_are_real_dois_and_urls():
+    from src.citations import CITATIONS, LAYER_CITE, citations_table, get
+
+    for key in LAYER_CITE.values():
+        c = get(key)
+        assert c.year >= 2011
+        assert c.url.startswith("http")
+        if c.doi:
+            assert c.doi.startswith("10.")
+    table = citations_table()
+    assert "barker2021" in set(table["key"]) and "kumari2022" in set(table["key"])
+    assert "Ganesh" not in table["citation"].to_string()
+    assert CITATIONS["kumari2022"].doi == "10.3847/PSJ/ac88c2"
+    assert CITATIONS["gracy2024"].url.endswith("1695.pdf")
 
 
 def test_kind_defaults_when_geojson_has_no_buffer():
@@ -337,6 +412,8 @@ def _stat_bundle(n=120, seed=3):
         "earth": np.full((n, n), 0.6, np.float32),
         "psr": None,
         "psr_dist": np.full((n, n), 500.0, np.float32),
+        "slope_err": None,
+        "height_err": None,
         "hillshade": np.full((n, n), 0.5, np.float32),
         "interpolated": count < 1,
         "transform": from_origin(-8000, 8000, 5, 5),
@@ -427,6 +504,9 @@ def test_interpolated_pixels_carry_more_slope_uncertainty():
     m = ErrorModel()
     sig = m.slope_sigma(np.array([True, False]))
     assert sig[0] > sig[1]
+    measured = np.array([0.8, 0.4], dtype=np.float32)
+    used = m.slope_sigma(np.array([True, False]), measured_err=measured)
+    np.testing.assert_allclose(used, measured)
 
 
 def test_dirichlet_concentration_tracks_requested_spread():
@@ -476,6 +556,7 @@ def test_assumptions_are_labelled_assumed_or_cited():
     from src.uncertainty import ErrorModel, assumptions_table
 
     t = assumptions_table(ErrorModel())
-    assert len(t) == len(ErrorModel.__dataclass_fields__)
+    assert set(ErrorModel.__dataclass_fields__) <= set(t["parameter"])
     assert t["source"].str.len().gt(0).all()
     assert t["source"].str.contains("assumed").any()
+    assert "slope_sigma_map" in set(t["parameter"])

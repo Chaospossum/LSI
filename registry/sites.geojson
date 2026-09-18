@@ -16,7 +16,7 @@
         "t_end": "2027-12-31",
         "rf_band": null,
         "coord_source": "approximate",
-        "source_url": "https://www.cnsa.gov.cn/ (public CE-7 south-polar targeting; coordinates approximate)"
+        "source_url": "https://www.cnsa.gov.cn/ (CE-7 south-polar targeting; coordinates widely reported as ~88.8°S 123°E — approximate, not a surveyed pad)"
       },
       "geometry": { "type": "Point", "coordinates": [123.4, -88.8] }
     },
@@ -33,7 +33,8 @@
         "t_end": "2028-12-31",
         "rf_band": null,
         "coord_source": "published",
-        "source_url": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site07/Site07_final_adj_5mpp_surf.tif"
+        "source_url": "https://www.nasa.gov/news-release/nasa-identifies-candidate-regions-for-landing-next-americans-on-moon/",
+        "citation": "PGDA Site07 5 m LDEM centroid (product extent, not a pad). Region name: NASA (2022) Peak Near Shackleton. DEM: Barker et al. 2021, doi:10.1016/j.pss.2020.105119."
       },
       "geometry": { "type": "Point", "coordinates": [123.690068, -88.811008] }
     },
@@ -87,6 +88,24 @@
         "source_url": "DEMO ONLY: placed on Site04 (Shackleton rim). Not a published MAGPIE site."
       },
       "geometry": { "type": "Point", "coordinates": [170.537678, -89.699106] }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "actor": "NASA (literature)",
+        "mission": "Artemis III Peak Near Shackleton — literature Site 007",
+        "kind": "lander",
+        "lat": -89.01701,
+        "lon": 126.27302,
+        "buffer_m": 2000,
+        "t_start": "2026-01-01",
+        "t_end": "2028-12-31",
+        "rf_band": null,
+        "coord_source": "approximate",
+        "source_url": "https://www.hou.usra.edu/meetings/lpsc2024/pdf/1695.pdf",
+        "citation": "Gracy & Lee (2024), 55th LPSC 1695. Candidate site 89.01701°S, 126.27302°E inside NASA 2022 Peak Near Shackleton. Not an official NASA pad. Context: Kumari et al. 2022 Planet. Sci. J. 3, 224, doi:10.3847/PSJ/ac88c2."
+      },
+      "geometry": { "type": "Point", "coordinates": [126.27302, -89.01701] }
     }
   ]
 }

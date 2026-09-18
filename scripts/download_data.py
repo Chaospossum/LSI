@@ -33,6 +33,17 @@ FILES = [
         "Site04_final_adj_5mpp_ldec.tif",
         "40980740",
     ),
+    # Barker et al. 2021 clone-ensemble RMS maps (PGDA product 78)
+    (
+        "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site04/Site04_final_adj_5mpp_slperr.tif",
+        "Site04_final_adj_5mpp_slperr.tif",
+        "40980806",
+    ),
+    (
+        "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site04/Site04_final_adj_5mpp_toterr.tif",
+        "Site04_final_adj_5mpp_toterr.tif",
+        "40980808",
+    ),
     # Site07 Peak near Shackleton — centre only for the NASA registry record
     (
         "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site07/Site07_final_adj_5mpp_surf.tif",
