@@ -1,0 +1,92 @@
+{
+  "type": "FeatureCollection",
+  "name": "lunar-site-intel-registry",
+  "crs": { "type": "name", "properties": { "name": "lunar-lonlat-sphere-1737400" } },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "actor": "CNSA",
+        "mission": "Chang'e-7",
+        "kind": "lander",
+        "lat": -88.8,
+        "lon": 123.4,
+        "buffer_m": 2000,
+        "t_start": "2027-01-01",
+        "t_end": "2027-12-31",
+        "rf_band": null,
+        "coord_source": "approximate",
+        "source_url": "https://www.cnsa.gov.cn/ (public CE-7 south-polar targeting; coordinates approximate)"
+      },
+      "geometry": { "type": "Point", "coordinates": [123.4, -88.8] }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "actor": "NASA",
+        "mission": "Peak near Shackleton (PGDA Site07 centre)",
+        "kind": "lander",
+        "lat": -88.811008,
+        "lon": 123.690068,
+        "buffer_m": 2000,
+        "t_start": "2026-01-01",
+        "t_end": "2028-12-31",
+        "rf_band": null,
+        "coord_source": "published",
+        "source_url": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site07/Site07_final_adj_5mpp_surf.tif"
+      },
+      "geometry": { "type": "Point", "coordinates": [123.690068, -88.811008] }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "actor": "Blue Origin",
+        "mission": "Blue Moon MK1 Endurance",
+        "kind": "lander",
+        "lat": -89.844444,
+        "lon": -147.994617,
+        "buffer_m": 2000,
+        "t_start": "2027-01-01",
+        "t_end": "2027-12-31",
+        "rf_band": null,
+        "coord_source": "placeholder",
+        "source_url": "DEMO ONLY: placed on Site04 grid so buffer overlap is visible. Not a published pad."
+      },
+      "geometry": { "type": "Point", "coordinates": [-147.994617, -89.844444] }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "actor": "Intuitive Machines",
+        "mission": "IM-4",
+        "kind": "lander",
+        "lat": -89.917555,
+        "lon": 180.0,
+        "buffer_m": 2000,
+        "t_start": "2027-06-01",
+        "t_end": "2027-12-31",
+        "rf_band": null,
+        "coord_source": "placeholder",
+        "source_url": "DEMO ONLY: placed on Site04 grid so buffer overlap is visible. Not a published pad."
+      },
+      "geometry": { "type": "Point", "coordinates": [180.0, -89.917555] }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "actor": "ESA / ispace",
+        "mission": "MAGPIE",
+        "kind": "lander",
+        "lat": -89.699106,
+        "lon": 170.537678,
+        "buffer_m": 2000,
+        "t_start": "2029-01-01",
+        "t_end": "2029-12-31",
+        "rf_band": null,
+        "coord_source": "placeholder",
+        "source_url": "DEMO ONLY: placed on Site04 (Shackleton rim). Not a published MAGPIE site."
+      },
+      "geometry": { "type": "Point", "coordinates": [170.537678, -89.699106] }
+    }
+  ]
+}

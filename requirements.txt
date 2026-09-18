@@ -1,0 +1,12 @@
+# Pinned for a laptop demo. Install once: pip install -r requirements.txt
+rasterio==1.4.3
+numpy==2.2.4
+geopandas==1.0.1
+shapely==2.1.0
+pyproj==3.7.1
+streamlit==1.44.1
+folium==0.19.5
+streamlit-folium==0.24.1
+matplotlib==3.10.1
+pandas==2.2.3
+pytest==8.3.5
